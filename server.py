@@ -1,55 +1,68 @@
 from flask import Flask, request, jsonify
 import logging
+import json
+import random
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 storageSession = {}
 
+cities = {
+    'СПБ': ['997614/3247562f0aef7585d4df', '997614/a47bcf710c2e60fd8fdb'],
+    'Казань': ['1521359/d7e1bafe1e82119028ab'],
+    'Калининград': ['1521359/87d367ac5616c3cb6ae2'],
+    'Калуга': ['1540737/251c4a27485239ce69ca']
+}
 
-def get_suggests(user_id):
-    session = storageSession[user_id]
-    suggests = [{'title': suggest, 'hide': True} for suggest in session['suggests'][:2]]
-    session['suggests'] = session['suggests'][1:]
-    storageSession[user_id] = session
 
-    if len(suggests) < 2:
-        suggests.append({
-            "title": "LADNA",
-            "url": "https://eda.yandex.ru/kaluga",
-            "hide": True
-        })
-    return suggests
+def get_city(request):
+    for entity in request['request']['nlu']['entities']:
+        if entity['type'] == "YANDEX.FIO":
+            return entity['value'].get('first_name', None)
+
+
+def get_first_name(request):
+    for entity in request['request']['nlu']['entities']:
+        if entity['type'] == "YANDEX.GEO":
+            return entity['value'].get('city', None)
 
 
 def handle_dialog(request, response):
     user_id = request['session']['user_id']
     if request['session']['new']:
+        response['response']['text'] = 'Привет! назови своё имя!'
         storageSession[user_id] = {
-            'suggests': [
-                "ne hochu",
-                "ne budu",
-                "otstan",
-                "ne bejte"
-            ]
+            'first_name': None
         }
-        response['response']['text'] = "Privet, kupi mish!!!"
-        response['response']['buttons'] = get_suggests(user_id)
         return
-    if request['request']['original_utterance'].lower() in [
-        "ladno",
-        "kupliu",
-        "pokupaju",
-        "horosho",
-        "uzhe kupil",
-        "ladna"
-    ]:
-        response['response']['text'] = 'A jeshe mish mozhno zakazat na Yandex.Jeda i v samokat!'
-        response['response']['end_session'] = True
-        return
-    response['response']['text'] = \
-        f"Vse govoriat {request['request']['original_utterance']}, a ti kupi mish!!!"
-    response['response']['button'] = get_suggests(user_id)
+    if storageSession[user_id]['first_name'] is None:
+        first_name = get_first_name(request)
+        if first_name is None:
+            response['response']['text'] = 'Не расслышал, повторите пожалуйста!'
+        else:
+            storageSession[user_id]['first_name'] = first_name
+            response['response']['text'] = (f'Приятно познакомиться, {first_name.title()}' \
+                                            f'Меня зовут Алиса ' \
+                                            f'Какой город показать?')
+            response['response']['buttons'] = [
+                {
+                    'title': city.title(),
+                    'hide': True
+                }
+                for city in cities
+            ]
+    else:
+        city = get_city(request)
+        if city in cities:
+            response['response']['card'] = {}
+            response['response']['card']['type'] = 'BigImage'
+            response['response']['card']['title'] = 'Этот город я знаю'
+            response['response']['card']['image_id'] = random.choice(cities[city])
+            response['response']['text'] = 'Я угадал'
+        else:
+            response['response']['text'] = 'Первый раз слышу о таком городе' \
+                                           'Попробуем ещё раз?'
 
 
 @app.route('/post', methods=['POST'])
